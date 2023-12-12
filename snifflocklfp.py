@@ -16,11 +16,6 @@ from scipy import signal
 import matplotlib.pyplot as plt
 
 
-sniff_file = r"\\F-moving-data\shnk3 (a)\080321_4131_session3_ADC.bin"
-ephys_file = r"\\F-moving-data\shnk3 (a)\080321_4131_session3_Ephys.bin"
-
-
-
 
 def load_sniff(sniff_file: str, num_samples: int) -> np.array:
     '''Loads binary sniff file into numpy array'''
@@ -53,18 +48,15 @@ def reshape_ephys(ephys: np.array, nchannels = 16) -> np.array:
 
 def remove_jumps_sniff(sniff: np.array) -> np.array:
     '''Removing an artifact from the signal which causes 65520mV jumps'''
-    for x in range(len(sniff)):
-        if sniff[x] > 40000:
-            sniff[x] -= 65520
+    jump_indices = sniff > 40000
+    sniff[jump_indices] -= 65520
     return sniff
 
 
 def remove_jumps_ephys(ephys: np.array, nchannels = 16) -> np.array:
     '''Removing an artifact from the signal which causes 65520mV jumps'''
-    for ch in range(nchannels):
-        for x in range(ephys.shape[1]):
-            if ephys[ch, x] > 40000:
-                ephys[ch, x] -= 65520
+    jump_indices = ephys > 40000
+    ephys[jump_indices] -= 65520
     return ephys
 
 
@@ -144,50 +136,32 @@ def sort_lfp(sniff_activity, nsniffs = 512, window_size = 1000, nchannels = 16):
     return sorted_activity
 
 
+def plot_snifflocked_lfp(lfp, nchannels, window_size):
+    '''plots the sniff locked lfp signal as heatmap where each inhalation is a unit on the y axis, time-lag from inhalation time on x-axis, and the strength of the lfp represented by color'''
 
-
-def main():
-    print('loading data...')
-    adcx = load_sniff(sniff_file, 900000000)
-    sniff = get_sniff(adcx)
-    ephys = load_ephys(ephys_file, 900000000)
-    ephys = reshape_ephys(ephys)
-    print('resampling...')
-    sniff = resample_sniff(sniff)
-    ephys = resample_ephys(ephys)
-    print('finding peaks...')
-    inhales, smoothed_sniff = find_inhales(sniff)
-    print('aligning...')
-    print(inhales.shape)
-    sniff_activity = sniff_lock_lfp(inhales, ephys, beg = 3000)
-    sorted_lfp = sort_lfp(sniff_activity)
-
-    nchannels = 16
-
-    fig, axs = plt.subplots(4, 4, figsize=(12, 12))  # Create a 4x4 grid of subplots
-    fig.subplots_adjust(hspace=0.5, wspace=0.5)  # Adjust the spacing between subplots
-
+    if nchannels == 16:
+        fig, axs = plt.subplots(4, 4, figsize=(12, 12))
+        fig.subplots_adjust(hspace=0.5, wspace=0.5)
+    
+    if nchannels == 32:
+        fig, axs = plt.subplots(6, 6, figsize=(8, 8))
+        fig.subplots_adjust(hspace=0.25, wspace=0.25)
+           
+    
     for ii in range(nchannels):
-        ax = axs[ii // 4, ii % 4]  # Determine the position of the subplot
-
-        # Plot the data
-        cax = ax.imshow(sorted_lfp[:, :, ii], aspect='auto')
-
-        # Add title to the subplot
+        if nchannels == 16:
+            ax = axs[ii // 4, ii % 4]
+        if nchannels == 32:
+            ax = axs[ii // 6, ii % 6]
+        cax = ax.imshow(lfp[:, :, ii], aspect='auto')
+        x_middle = lfp.shape[1] // 2
         ax.set_title(f'Channel {ii + 1}')
-
-        # Set x-tick positions
-        x_middle = sorted_lfp.shape[1] // 2
-        ax.set_xticks([x_middle - 500, x_middle, x_middle + 500])
-        ax.set_xticklabels(['-500', '0', '500'])
-
-        # Set labels (remove y-tick labels)
+        ax.set_xticks([x_middle - window_size/2, x_middle, x_middle + window_size/2])
+        ax.set_xticklabels([-window_size/2, '0', window_size/2])
         ax.set_yticklabels([])
         ax.set_yticks([])
 
-    # Show the plot
     plt.show()
-
 
 
 
