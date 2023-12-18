@@ -12,7 +12,6 @@ ephys_file = r"\\F-MOVING-DATA\EphysData\DATA_MATT_DRIVE\fromData_Restrx_Ob_Fina
 def main():
 
     print('loading data...')
-
     sniff = load_sniff(sniff_file, 18000000)
     ephys = load_ephys(ephys_file, 18000000, nchannels= 16)
 
@@ -43,4 +42,5 @@ def main():
     plot_snifflocked_lfp(sniff_activity, nchannels=16)
     plot_snifflocked_lfp(sorted_activity, nchannels=16)
    
+    
 main()
