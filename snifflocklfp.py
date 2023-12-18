@@ -1,4 +1,5 @@
-"""snifflocklfp library
+"""
+snifflocklfp library
 
 This library contains functions for reading in local field potential and sniff data, preprocessing signals, and further analysis including aligning neural data to inhalation times.
 
