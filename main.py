@@ -6,32 +6,41 @@ By: Sid Rafilson
 
 from snifflocklfp import *
 
-sniff_file = r"\\F-moving-data\shnk3 (a)\080321_4131_session3_ADC.bin"
-ephys_file = r"\\F-moving-data\shnk3 (a)\080321_4131_session3_Ephys.bin"
+sniff_file = r"\\F-MOVING-DATA\EphysData\DATA_MATT_DRIVE\fromData_Restrx_Ob_Final\4122\5\121620_4122_hf2fm_ADC_int16_med0_nch8.bin"
+ephys_file = r"\\F-MOVING-DATA\EphysData\DATA_MATT_DRIVE\fromData_Restrx_Ob_Final\4122\5\121620_4122_hf2fm_Ephys_int16_med0_nch16.bin"
 
 def main():
 
     print('loading data...')
-    adcx = load_sniff(sniff_file, 600000000)
-    sniff = get_sniff(adcx)
-    ephys = load_ephys(ephys_file, 600000000)
-    ephys = reshape_ephys(ephys)
+
+    sniff = load_sniff(sniff_file, 18000000)
+    ephys = load_ephys(ephys_file, 18000000, nchannels= 16)
+
+    print('converting data type...')
+    sniff = sniff.astype(np.int32)
+    ephys = ephys.astype(np.int32)
+
+    print('removing artifact...')
+    ephys = remove_jumps_ephys(ephys)
+    sniff = remove_jumps_sniff(sniff)
 
     print('resampling...')
     sniff = resample_sniff(sniff)
-    ephys = resample_ephys(ephys)
+    ephys = resample_ephys(ephys, nchannels=16)
+
+    plot_ephys(ephys, nchannels=16)
+    peak_finder_validation(sniff)
 
     print('finding peaks...')
-    inhales, smoothed_sniff = find_inhales(sniff)
+    inhales, _ = find_inhales(sniff)
+
+    print(f'number of inhales in loaded data = {inhales.shape}')
 
     print('aligning...')
-    sniff_activity = sniff_lock_lfp(inhales, ephys, beg = 3000)
-    sorted_lfp = sort_lfp(sniff_activity, inhales)
-    plot_snifflocked_lfp(sorted_lfp, 16, 1000)
-    avg_lfp = avg_sniff_locked_lfp(sorted_lfp)
-    plot_avg_lfp(avg_lfp)
-    lfp = sniff_lock_lfp_infreq(inhales, ephys, [6, 8])
-    plot_snifflocked_lfp(lfp)
-    
+    sniff_activity, locs = sniff_lock_lfp(inhales, ephys, beg =20000, nsniffs = 200, nchannels=16)
+    sorted_activity =  sort_lfp(sniff_activity, locs)
 
+    plot_snifflocked_lfp(sniff_activity, nchannels=16)
+    plot_snifflocked_lfp(sorted_activity, nchannels=16)
+   
 main()
