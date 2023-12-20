@@ -34,13 +34,19 @@ def load_sniff(sniff_file: str, num_samples: int, nchannels = 8, ch = 8) -> np.a
     - The number of samples specified is dynamic for debugging but can easily fit the entire data set with num_samples = -1.
     - Channel numbers start from 1. For instance, ch = 1 will extract the first channel.
     '''
-    adcx = np.fromfile(sniff_file, dtype=np.uint16, count=num_samples)
+    
+    # reading in binary data
     num_samples = num_samples * nchannels
-    num_complete_sets = len(adcx) // nchannels
-    adcx = adcx[:num_complete_sets * nchannels]
-    adcx = np.reshape(adcx, (nchannels, -1), order = 'F')
+    sniff_bin = np.fromfile(sniff_file, dtype=np.uint16, count=num_samples)
+
+    # ensuring equal samples from each channel
+    num_complete_sets = len(sniff_bin) // nchannels
+    sniff_bin = sniff_bin[:num_complete_sets * nchannels]
+
+    # reshaping data and extracting channel which corresponds to sniff voltage
+    sniff_bin = np.reshape(sniff_bin, (nchannels, -1), order = 'F')
     ch_index = ch - 1
-    sniff = adcx[ch_index, :]
+    sniff = sniff_bin[ch_index, :]
     return sniff
 
     
@@ -61,9 +67,17 @@ def load_ephys(ephys_file: str, num_samples: int, nchannels = 16) -> np.array:
     np.array: A 2D NumPy array of the electrophysiology data, reshaped into
               (nchannels, number_of_samples_per_channel).
     '''
+  
+    # reading in binary data
     num_samples = num_samples * nchannels
-    ephys = np.fromfile(ephys_file, dtype=np.uint16, count = num_samples)
-    ephys_data = np.reshape(ephys, (nchannels, -1), order='F')
+    ephys_bin = np.fromfile(ephys_file, dtype=np.uint16, count = num_samples)
+    
+    # ensuring equal samples from each channel
+    num_complete_sets = len(ephys_bin) // nchannels
+    ephys_bin = ephys_bin[:num_complete_sets * nchannels]
+
+    # reshape 1d array into nchannels x num_samples NumPy array
+    ephys_data = np.reshape(ephys_bin, (nchannels, -1), order='F')
     return(ephys_data)
 
 
@@ -229,7 +243,7 @@ def peak_finder_validation(sniff: np.array):
     plt.show()
 
 
-def sniff_lock_lfp(locs: np.array, ephys: np.array, nchannels = 16, window_size = 1000, nsniffs = 512, beg = 3000) -> np.array:
+def sniff_lock_lfp(locs: np.array, ephys: np.array, window_size = 1000, nsniffs = 512, beg = 3000) -> np.array:
     '''
     Aligns local field potential (LFP) signals with sniff inhalation times and constructs a 3D array of z-scored LFP activity.
 
@@ -252,6 +266,11 @@ def sniff_lock_lfp(locs: np.array, ephys: np.array, nchannels = 16, window_size 
     Raises:
     ValueError: If the 'locs' array does not contain enough data after the specified 'beg' index for the required number of sniffs.
     '''
+
+    print(beg)
+    print(nsniffs)
+    # finding number of channels
+    nchannels = ephys.shape[0]
 
     # finds nsniffs consecutive inhalation times starting at beg, saving these times to loc_set
     first_loc = np.argmax(locs >= beg)
@@ -296,12 +315,47 @@ def sort_lfp(sniff_activity, locs):
     # sorting the ephys data according to these times
     sort_indices = np.argsort(freqs)
     sorted_activity[:, :, :] = sniff_activity[:, sort_indices, :]
-    return sorted_activity  
+    return sorted_activity
 
 
-def plot_snifflocked_lfp(lfp, nchannels = 16, window_size = 1000):
-    '''plots the sniff locked lfp signal as heatmap where each inhalation is a unit on the y axis, time-lag from inhalation time on x-axis, and the strength of the lfp represented by color'''
+def sort_lfp_test(sniff_activity, locs):
+    '''sorts the sniff locked lfp trace by sniff frequency'''
 
+    nchannels = sniff_activity.shape[0]
+    nsniffs = sniff_activity.shape[1]
+    window_size = sniff_activity.shape[2]
+    
+    sorted_activity = np.zeros((nchannels, nsniffs-1, window_size))
+    
+    # finding sniff frequencies by inhalation time differences (we lose the last sniff)
+    freqs = np.diff(locs)
+
+    first = sniff_activity[:-2, :, :]
+    last = sniff_activity[:,:,:-2]
+
+    print(len(first[0]))
+    print(len(last[2]))
+    sorted_activity[:, :, :] = first[0], freqs, last[0]
+    return sorted_activity
+
+
+def plot_snifflocked_lfp(lfp, show_y = False):
+    '''
+    Plots the sniff-locked LFP signal as a heatmap where each inhalation is a unit 
+    on the y-axis, time-lag from inhalation time on the x-axis, and the strength of 
+    the LFP represented by color.
+
+    Parameters
+    ----------
+    lfp : np.array
+        A 3D numpy array of LFP data. The first dimension represents channels, the 
+        second dimension represents sniffs, and the third dimension represents time lags.
+    '''
+
+    # finding size for subplot layout
+    nchannels = lfp.shape[0]
+
+    # Create subplots based on the number of channels
     if nchannels == 16:
         fig, axs = plt.subplots(4, 4, figsize=(12, 12))
         fig.subplots_adjust(hspace=0.5, wspace=0.5)
@@ -312,8 +366,16 @@ def plot_snifflocked_lfp(lfp, nchannels = 16, window_size = 1000):
     elif nchannels == 64:
         fig, axs = plt.subplots(8, 8, figsize=(6, 6))
         fig.subplots_adjust(hspace=0.1, wspace=0.1)
-           
-    x_middle = lfp.shape[2] // 2
+    
+    # title and x-axis size
+    fig.suptitle("Sniff-Locked LFP Visualization", fontsize=16)
+    window_size = lfp.shape[2]
+    x_middle = window_size // 2
+
+    # extracting subset of values for y tick labels
+    y_ticks = np.linspace(0, lfp.shape[1] - 1, num = 5, dtype = int)
+    y_ticks_labels = [lfp[0, y, 0] for y in y_ticks]
+
     for ch in range(nchannels):
         if nchannels == 16:
             ax = axs[ch // 4, ch % 4]
@@ -321,14 +383,62 @@ def plot_snifflocked_lfp(lfp, nchannels = 16, window_size = 1000):
             ax = axs[ch // 6, ch % 6]
         elif nchannels ==64:
             ax = axs[ch // 8, ch % 8]
+
+        # Plotting each channel
         cax = ax.imshow(lfp[ch, :, :], aspect='auto')
         ax.set_title(f'Channel {ch + 1}')
+
+        # x-axis
         ax.set_xticks([x_middle - window_size/2, x_middle, x_middle + window_size/2])
         ax.set_xticklabels([-window_size/2, '0', window_size/2])
-        ax.set_yticklabels([])
-        ax.set_yticks([])
+
+        # y-axis
+        if show_y:
+            ax.set_yticks(y_ticks)
+            ax.set_yticklabels(y_ticks_labels)
+        else:
+            ax.set_yticks([])
+            ax.set_yticklabels([])
+        
+        #colorbar
         fig.colorbar(cax, ax=ax)
+
     plt.show()
+
+
+def combine_channels(lfp: np.array) -> np.array:
+    '''
+    Combine multiple channels of LFP (Local Field Potential) data by averaging.
+
+    This function processes an array of LFP data, where the data is assumed to be
+    organized with one dimension for channels, one for "sniffs" or time points, 
+    and one for the sampling window within each sniff. The function averages the 
+    LFP data across all channels for each time point within each sniff, resulting 
+    in a 2D array with dimensions corresponding to sniffs and window time points.
+
+    Parameters:
+    lfp : np.array
+        A 3D numpy array of LFP data. The dimensions are expected to be in the 
+        order of (channels, sniffs, window time points).
+
+    Returns:
+    np.array
+        A 2D numpy array where each element is the average of the LFP data across 
+        all channels for a given sniff and time point. The dimensions are (sniffs, 
+        window time points).
+        '''
+
+
+    # finding data shape
+    nsniffs = lfp.shape[1]
+    window_size = lfp.shape[2]
+
+    # averaging across channels
+    combined_lfp = np.zeros((nsniffs, window_size))
+    for ii in range(window_size):
+        for sniff in range(nsniffs):
+            combined_lfp[sniff, ii] = np.mean(lfp[:,sniff,ii])
+    return combined_lfp
 
 
 def avg_sniff_locked_lfp(lfp, nchannels = 16, window_size = 1000):
@@ -395,4 +505,107 @@ def sniff_lock_lfp_infreq(locs: np.array, ephys: np.array, freq_bin = [6,8], nch
             infreq_activity = np.zeros((len(npeaks), window_size, nchannels))
         infreq_activity[:, :, ch] = sniff_activity[npeaks, :, ch]
     return infreq_activity
+    
 
+def plot_single_lfp(lfp: np.array):
+    '''
+    Plots averaged LFP data from all channels with a colorbar.
+
+    This function visualizes a 2D numpy array of LFP data using a heatmap.
+    The plot includes a title, labeled axes, custom tick labels for the x-axis, 
+    and a colorbar with a label to interpret the average z-scored LFP values.
+
+    Parameters
+    ----------
+    lfp : np.array
+        A 2D numpy array of LFP data to be visualized. The first dimension 
+        represents different sniffs, and the second dimension represents time lags.
+    '''
+    window_size = lfp.shape[1]
+    x_middle = window_size // 2
+
+    im = plt.imshow(lfp, aspect='auto')
+
+    plt.title('Averaged LFP from all Channels')
+    plt.xlabel('Time Lag')
+    plt.ylabel('Sniff')
+
+    ax = plt.gca()
+    ax.set_xticks([x_middle - window_size/2, x_middle, x_middle + window_size/2])
+    ax.set_xticklabels([-window_size/2, '0', window_size/2])
+
+    plt.colorbar(im, label='Avg Z-scored LFP Value')
+    plt.show()
+
+
+def circular_shift(ephys: np.array, nshifts: int = 1000, method: str = 'sample') -> np.array:
+    '''
+    Perform circular shifts on an electrophysiological signal array.
+
+    This function applies circular shifts to a 2D numpy array representing electrophysiological (ephys) data. 
+    It supports two methods of shifting: 'sample' and 'random'. 
+    For 'sample', the function creates evenly spaced shifts if the number of columns in `ephys` is divisible by `nshifts`.
+    If not, it recursively calls itself with one less shift until this condition is met.
+    For 'random', the function applies a random shift for each of the `nshifts`.
+    
+    The function preallocates an array `circ_ephys` to store the shifted arrays.
+
+    Parameters:
+    ephys (np.array): A 2D numpy array representing electrophysiological data. 
+                      The first dimension corresponds to different signals or channels, 
+                      and the second dimension corresponds to time points.
+    nshifts (int, optional): The number of shifts to be applied. Default is 1000.
+    method (str, optional): The method of shifting to be used. 
+                            Can be 'sample' for evenly spaced shifts or 'random' for random shifts. 
+                            Default is 'sample'.
+
+    Returns:
+    np.array: A 3D numpy array where each 'slice' (along the third dimension) 
+              is the `ephys` array after a circular shift.
+
+    '''
+
+    # preallocating an array to hold the ephys signal after all nshifts
+    nchannels = ephys.shape[0]   
+    signal_length = ephys.shape[1]
+    circ_ephys = np.zeros((nchannels, signal_length, nshifts))
+
+    if method == 'sample':
+        # shifting the ephys with evenly spaced shifts
+        if ephys.shape[1] % nshifts == 0:
+            print(f'performing circular shift with {nshifts} shifts')
+            jump = ephys.shape[1] // nshifts
+            for ii in range(nshifts):
+                circ_ephys[:,:,ii] = np.roll(ephys, ii * jump, axis = 1)
+        else:
+            circular_shift(ephys, nshifts - 1, method = method)
+
+    if method == 'random':
+        # shifting the ephys signal with nshifts random shifts
+        for ii in range(nshifts):
+            circ_ephys[:,:,ii] = np.roll(ephys, np.random.randint(0, nshifts), axis = 1)
+
+    print(circ_ephys.shape)
+
+    return circ_ephys
+
+
+def create_circular_null(circ_ephys: np.array, locs: np.array, nsniffs: int = 200, window_size: int = 1000, beg: int = 3000, sort = True) -> np.array:
+
+    '''
+
+    '''
+
+    # preallocating an array to hold the distributions of lfp voltages at each channel, each sniff, and each time-lag as a function of the nshifts
+    nchannels = circ_ephys.shape[0]
+    nshifts = circ_ephys.shape[2]
+    circular_sniff = np.zeros((nchannels, nsniffs, window_size, nshifts), dtype = np.float64)
+    print(beg)
+
+    # propogating a 4d array containing the null distribution
+    for shift in range(nshifts):
+        circular_sniff[:,:,:,shift], locs = sniff_lock_lfp(locs, circ_ephys[:,:,shift], nsniffs = nsniffs, beg = beg)
+
+    print(circular_sniff.shape)
+    
+    return circular_sniff
