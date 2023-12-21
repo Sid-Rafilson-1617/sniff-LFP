@@ -8,8 +8,10 @@ Orginal MATLAB functions written by: Nate Hess
 
 """
 
+import math
 import numpy as np
 from scipy import signal
+from scipy import stats
 import matplotlib.pyplot as plt
 
 
@@ -593,19 +595,125 @@ def circular_shift(ephys: np.array, nshifts: int = 1000, method: str = 'sample')
 def create_circular_null(circ_ephys: np.array, locs: np.array, nsniffs: int = 200, window_size: int = 1000, beg: int = 3000, sort = True) -> np.array:
 
     '''
+    Create a circular null distribution of LFP voltages across different channels, sniffs, and time-lags.
 
+    This function generates a four-dimensional array representing the circularly shifted lfp signals, locked to inhalation times,
+    which serves as a null distribution for further analysis. The array contains the distributions of local field
+    potential (LFP) voltages for each channel, each sniff, and each time-lag, as a function of the number of shifts.
+
+    Parameters:
+    - circ_ephys (np.array): A 3D numpy array representing circularly shifted electrophysiological data.
+                             The dimensions are expected to be [nchannels, _, nshifts].
+    - locs (np.array): Array of inhalation times to be used in the sniff-locking process.
+    - nsniffs (int, optional): Number of sniffs to consider. Defaults to 200.
+    - window_size (int, optional): The size of the window for analysis. Defaults to 1000.
+    - beg (int, optional): The beginning index for the window of analysis. Defaults to 3000.
+    - sort (bool, optional): Flag to determine whether to sort the data. Defaults to True.
+
+    Returns:
+    - np.array: A 4D numpy array with dimensions [nchannels, nsniffs, window_size, nshifts],
+                representing the null distribution of LFP voltages.
     '''
 
     # preallocating an array to hold the distributions of lfp voltages at each channel, each sniff, and each time-lag as a function of the nshifts
     nchannels = circ_ephys.shape[0]
     nshifts = circ_ephys.shape[2]
-    circular_sniff = np.zeros((nchannels, nsniffs, window_size, nshifts), dtype = np.float64)
+    circular_null = np.zeros((nchannels, nsniffs, window_size, nshifts), dtype = np.float64)
     print(beg)
 
-    # propogating a 4d array containing the null distribution
+    # propogating a 4d array containing the circul shifted sniff locked signals i.e. the null distribution
     for shift in range(nshifts):
-        circular_sniff[:,:,:,shift], locs = sniff_lock_lfp(locs, circ_ephys[:,:,shift], nsniffs = nsniffs, beg = beg)
+        circular_null[:,:,:,shift], locs = sniff_lock_lfp(locs, circ_ephys[:,:,shift], nsniffs = nsniffs, beg = beg)
 
-    print(circular_sniff.shape)
+    return circular_null
+
+
+        
+
+def check_normality(circular_null: np.array, plot = True, nsamples: int = 4, KStest = True):
+
+
+    nchannels, nsniffs, window_size, _ = circular_null.shape
+
+    # Randomly select nsamples combinations of channels, sniffs, and times
+    random_combinations = [(np.random.randint(nchannels), np.random.randint(nsniffs), np.random.randint(window_size))
+                               for _ in range(nsamples)]
+
+    if plot:
+
+        # Determine the subplot grid dimensions
+        sqrt_samples = math.ceil(math.sqrt(nsamples))
+        fig, axs = plt.subplots(sqrt_samples, sqrt_samples, figsize=(12, 12))
+        axs = axs.flatten()  # Flatten the array of axes for easier iteration
+
+        # Create a histogram for each random combination
+        for i, (ch, sniff, t) in enumerate(random_combinations):
+            data = circular_null[ch, sniff, t, :].flatten()
+            axs[i].hist(data, bins=20, alpha=0.7)
+            axs[i].set_title(f'Ch {ch}, Sniff {sniff}, Time {t}')
+            axs[i].set_xlabel('Value')
+            axs[i].set_ylabel('Frequency')
+
+            # Hide unused subplots if any
+            if i >= len(axs):
+                axs[i].set_visible(False)
+
+        plt.tight_layout()
+        plt.show()
+        plt.close(fig)
+
+    if KStest:
+        for i, (ch, sniff, t) in enumerate(random_combinations):
+            data = circular_null[ch, sniff, t, :].flatten()
+            KStest_stat = stats.kstest(data, stats.norm.cdf)
+            p = KStest_stat.pvalue
+            print(p)
+
+
+        
+
+
+
+
+def sniff_lock_std(locs: np.array, circular_null: np.array, beg: int = 3000, window_size: int = 1000, nsniffs: int = 200) -> np.array:
+
+
+    # finding number of channels
+    nchannels = circular_null.shape[0]
+
+    # finding nsniffs consecutive inhalation times starting at beg, saving these times to loc_set
+    first_loc = np.argmax(locs >= beg)
+    print(f'first inhale is #{first_loc}')
+    loc_set = locs[first_loc: first_loc + nsniffs]
+    print(f'last inhale is #{len(loc_set) + first_loc}')
+    if len(loc_set) < nsniffs:
+        raise ValueError("locs array does not have enough data for the specified range.")
     
-    return circular_sniff
+    # propogates an nx2 array containing times half the window size in both directions from inhalation times
+    windows = np.zeros((nsniffs, 2), dtype=int)
+    for ii in range(nsniffs):
+        win_beg = loc_set[ii] - round(window_size/2)
+        win_end = loc_set[ii] + round(window_size/2)
+        windows[ii] = [win_beg, win_end]
+
+    # finds and saves lfp zscore from null distribution in each channel for each moment around each inhalaion
+    sniff_activity = np.zeros((nchannels, nsniffs, window_size))
+    for sniff in range(nsniffs):
+        for ch in range(nchannels):
+            for t in range(window_size):
+                win_beg, win_end = windows[ii]
+
+                # sniff locked value
+                value = circular_null[ch, sniff, t, 0]
+
+                # mean of distribution
+                mu = np.mean(circular_null[ch, sniff, t, :].flatten())
+
+                # standard deviation
+                sigma = np.std(circular_null[ch, sniff, t, :].flatten())
+
+                # calculating the z-score with respect to the null distribution and saving to sniff_activity
+                z = (value - mu) / sigma
+                sniff_activity[ch, sniff, t] = z
+
+    return sniff_activity, loc_set
