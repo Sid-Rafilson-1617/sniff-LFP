@@ -12,8 +12,8 @@ ephys_file = r"\\F-MOVING-DATA\EphysData\DATA_MATT_DRIVE\fromData_Restrx_Ob_Fina
 def main():
 
     print('loading data...')
-    sniff = load_sniff(sniff_file, 18000000)
-    ephys = load_ephys(ephys_file, 18000000, nchannels= 16)
+    sniff = load_sniff(sniff_file, 30000000)
+    ephys = load_ephys(ephys_file, 30000000, nchannels= 16)
 
     print('converting data type...')
     sniff = sniff.astype(np.int32)
@@ -27,20 +27,36 @@ def main():
     sniff = resample_sniff(sniff)
     ephys = resample_ephys(ephys, nchannels=16)
 
-    plot_ephys(ephys, nchannels=16)
-    peak_finder_validation(sniff)
-
     print('finding peaks...')
     inhales, _ = find_inhales(sniff)
 
-    print(f'number of inhales in loaded data = {inhales.shape}')
+    print('aligning/sorting...')
+    beg = 20000
+    nsniffs = 200
+    window_size = 1000
+    sniff_activity, locs_set = sniff_lock_lfp(inhales, ephys, window_size=window_size, beg = beg, nsniffs = nsniffs)
+    sorted_activity =  sort_lfp(sniff_activity, locs_set)
 
-    print('aligning...')
-    sniff_activity, locs = sniff_lock_lfp(inhales, ephys, beg =20000, nsniffs = 200, nchannels=16)
-    sorted_activity =  sort_lfp(sniff_activity, locs)
+    print('creating null distributions...')
+    shifts = 100
+    circular_ephys = circular_shift(ephys, shifts)
+    null = create_circular_null(circular_ephys, inhales, nsniffs = nsniffs, window_size = window_size, beg = beg)
 
-    plot_snifflocked_lfp(sniff_activity, nchannels=16)
-    plot_snifflocked_lfp(sorted_activity, nchannels=16)
-   
+    print('finding z-scores from null')
+    sniff_activity_shift, locs_set_1 = sniff_lock_std(inhales, null, window_size=window_size, beg = beg, nsniffs = nsniffs)
+    sorted_activity_shift = sort_lfp(sniff_activity_shift, locs_set_1)
+
+
+    print('plotting...')
+    plot_snifflocked_lfp(sniff_activity)
+    plot_snifflocked_lfp(sorted_activity, show_y = False)
+    plot_snifflocked_lfp(sniff_activity_shift)
+    plot_snifflocked_lfp(sorted_activity_shift)
     
+
+    
+    
+
+
+
 main()
