@@ -32,7 +32,7 @@ def main():
 
     print('aligning/sorting...')
     beg = 20000
-    nsniffs = 200
+    nsniffs = 500
     window_size = 1000
     sniff_activity, locs_set = sniff_lock_lfp(inhales, ephys, window_size=window_size, beg = beg, nsniffs = nsniffs)
     sorted_activity =  sort_lfp(sniff_activity, locs_set)
@@ -40,18 +40,20 @@ def main():
     print('creating null distributions...')
     shifts = 100
     circular_ephys = circular_shift(ephys, shifts)
-    null = create_circular_null(circular_ephys, inhales, nsniffs = nsniffs, window_size = window_size, beg = beg)
+    nulls = create_circular_null(circular_ephys, inhales, nsniffs = nsniffs, window_size = window_size, beg = beg)
+
+    print('checking normallity')
+    sig_ratios = plot_normality(nulls, niters = 1000)
+    
 
     print('finding z-scores from null')
-    sniff_activity_shift, locs_set_1 = sniff_lock_std(inhales, null, window_size=window_size, beg = beg, nsniffs = nsniffs)
+    sniff_activity_shift, locs_set_1 = sniff_lock_std(inhales, nulls, window_size=window_size, beg = beg, nsniffs = nsniffs)
     sorted_activity_shift = sort_lfp(sniff_activity_shift, locs_set_1)
 
 
     print('plotting...')
-    plot_snifflocked_lfp(sniff_activity)
-    plot_snifflocked_lfp(sorted_activity, show_y = False)
-    plot_snifflocked_lfp(sniff_activity_shift)
-    plot_snifflocked_lfp(sorted_activity_shift)
+    plot_snifflocked_lfp(sorted_activity, subtitle = 'zscored from signal')
+    plot_snifflocked_lfp(sorted_activity_shift, subtitle = 'zscored from null distribution')
     
 
     
