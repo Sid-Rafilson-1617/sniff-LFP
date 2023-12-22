@@ -341,7 +341,7 @@ def sort_lfp_test(sniff_activity, locs):
     return sorted_activity
 
 
-def plot_snifflocked_lfp(lfp, show_y = False):
+def plot_snifflocked_lfp(lfp, show_y = False, subtitle: str = ''):
     '''
     Plots the sniff-locked LFP signal as a heatmap where each inhalation is a unit 
     on the y-axis, time-lag from inhalation time on the x-axis, and the strength of 
@@ -370,7 +370,10 @@ def plot_snifflocked_lfp(lfp, show_y = False):
         fig.subplots_adjust(hspace=0.1, wspace=0.1)
     
     # title and x-axis size
-    fig.suptitle("Sniff-Locked LFP Visualization", fontsize=16)
+    fig.suptitle("Sniff-Locked LFP", fontsize=16)
+
+    fig.text(0.5, 0.95, subtitle, ha='center', va='top', fontsize=12)
+
     window_size = lfp.shape[2]
     x_middle = window_size // 2
 
@@ -387,7 +390,7 @@ def plot_snifflocked_lfp(lfp, show_y = False):
             ax = axs[ch // 8, ch % 8]
 
         # Plotting each channel
-        cax = ax.imshow(lfp[ch, :, :], aspect='auto')
+        cax = ax.imshow(lfp[ch, :, :], aspect='auto', cmap = 'seismic')
         ax.set_title(f'Channel {ch + 1}')
 
         # x-axis
@@ -626,12 +629,30 @@ def create_circular_null(circ_ephys: np.array, locs: np.array, nsniffs: int = 20
         circular_null[:,:,:,shift], locs = sniff_lock_lfp(locs, circ_ephys[:,:,shift], nsniffs = nsniffs, beg = beg)
 
     return circular_null
-
-
         
 
-def check_normality(circular_null: np.array, plot = True, nsamples: int = 4, KStest = True):
+def check_normality(circular_null: np.array, alpha: float = 0.05, plot: bool = True, nsamples: int = 4, KStest: bool = True) -> float:
+    """
+    Check the normality of randomly selected samples from a 4D array using histograms and the Kolmogorov-Smirnov test.
 
+    This function randomly selects a specified number of samples from a 4D array (circular_null) and performs two checks for normality:
+    1. Plots histograms of these samples if the 'plot' parameter is True.
+    2. Performs the Kolmogorov-Smirnov test on these samples to compare them with a normal distribution if 'KStest' is True.
+
+    Parameters:
+    - circular_null (np.array): A 4D numpy array from which samples are drawn.
+    - alpha (float, optional): alpha value criteria for signficance. Defaults to 0.05.
+    - plot (bool, optional): If True, histograms of the selected samples are plotted. Defaults to True.
+    - nsamples (int, optional): The number of random samples to draw for normality checking. Defaults to 4.
+    - KStest (bool, optional): If True, performs the Kolmogorov-Smirnov test on the selected samples. Defaults to True.
+
+    Returns:
+    - float: The ratio of samples that did not significantly deviate from a normal distribution (p > alpha) in the Kolmogorov-Smirnov test.
+
+    Note:
+    - The function returns the ratio of samples with p-values greater than alpha in the Kolmogorov-Smirnov test, indicating non-significant deviation from normality.
+    - The function plots histograms for visual inspection of normality if 'plot' is set to True.
+    """
 
     nchannels, nsniffs, window_size, _ = circular_null.shape
 
@@ -663,19 +684,102 @@ def check_normality(circular_null: np.array, plot = True, nsamples: int = 4, KSt
         plt.close(fig)
 
     if KStest:
+        count = 0
         for i, (ch, sniff, t) in enumerate(random_combinations):
             data = circular_null[ch, sniff, t, :].flatten()
             KStest_stat = stats.kstest(data, stats.norm.cdf)
             p = KStest_stat.pvalue
-            print(p)
+            if p > alpha:
+                count += 1
+
+    # calculate the ratio of signficant to non-signficant distributions           
+    ratio = count / nsamples
+
+    return ratio
 
 
-        
+def plot_normality(circular_null: np.array, niters: int = 1000, step_size: int = 1, plot: bool = True) -> np.array:
+    """
+    Assess and plot the fraction of Gaussian distributions in a 4D array over a range of sample sizes.
 
+    This function iteratively increases the number of samples drawn from a 4D array (circular_null) to check for Gaussianity. 
+    At each iteration, it calculates the fraction of these samples that are Gaussian based on a normality check function 
+    (assumed to be `check_normality`). The results are plotted against the number of distributions sampled if 'plot' is True.
 
+    Parameters:
+    - circular_null (np.array): A 4D numpy array to be analyzed for normality.
+    - niters (int, optional): The number of iterations for which the normality check is run. Defaults to 1000.
+    - step_size (int, optional): The increment in the number of samples checked for normality at each iteration. Defaults to 1.
+    - plot (bool, optional): If True, the function plots the fraction of Gaussian distributions over the iterations. Defaults to True.
+
+    Returns:
+    - np.array: An array of the fraction of Gaussian distributions for each iteration.
+
+    Note:
+    - The function assumes the existence of a `check_normality` function that returns the fraction of distributions that are Gaussian for a given number of samples.
+    - The plot, if enabled, displays the trend in the fraction of Gaussian distributions as the sample size increases.
+    """
+
+    # finding fraction of significant distributions at each iteration of number of samples
+    sig_ratios = np.zeros((niters))
+    for i in range(niters):
+        nsamples = i * step_size + 1
+        sig_ratios[i] = check_normality(circular_null, plot = False, nsamples = nsamples)
+
+    # plotting
+    if plot:
+        fig, ax = plt.subplots()
+        ax.plot(sig_ratios)
+        ax.set(xlabel='number of distributions', ylabel='fraction',
+        title='Fraction of Gaussian Distributions', )
+        ax.grid()
+
+        plt.show()
+
+    return sig_ratios
 
 
 def sniff_lock_std(locs: np.array, circular_null: np.array, beg: int = 3000, window_size: int = 1000, nsniffs: int = 200) -> np.array:
+    """
+    Calculates the z-scores of sniff-locked LFP values with respect to a null distribution.
+
+    This function processes Local Field Potential (LFP) data to find the z-score of LFP values at each channel
+    and each moment around each inhalation, relative to a null distribution. It identifies inhalation times from the `locs` array,
+    creates windows around these times, and computes z-scores for LFP values in these windows based on the mean and standard deviation
+    of the null distribution.
+
+    Parameters:
+    ----------
+    locs : np.array
+        Array of inhalation times.
+    circular_null : np.array
+        A 4D numpy array representing the null distribution of LFP data. The dimensions are expected to be [nchannels, _, _, nshuffles].
+    beg : int, optional
+        The beginning index for selecting inhalation times. Defaults to 3000.
+    window_size : int, optional
+        Size of the window to consider around each inhalation time. Defaults to 1000.
+    nsniffs : int, optional
+        Number of consecutive sniffs to consider starting from the 'beg' index. Defaults to 200.
+
+    Returns:
+    -------
+    tuple: (sniff_activity, loc_set)
+        sniff_activity : np.array
+            A 3D numpy array where each element is the z-score of the LFP value for a specific channel, sniff, and time relative to the null distribution.
+        loc_set : np.array
+            Array of selected inhalation times based on 'beg' and 'nsniffs'.
+
+    Raises:
+    ------
+    ValueError
+        If the 'locs' array does not have enough data for the specified range.
+
+    Notes:
+    -----
+    - The function assumes the 'circular_null' array is structured as [channels, sniffs, time-lags, shuffles].
+    - The z-scores are calculated for each channel, sniff, and time-lag using the corresponding mean and standard deviation from the null distribution.
+    """
+    # Function implementation...
 
 
     # finding number of channels
