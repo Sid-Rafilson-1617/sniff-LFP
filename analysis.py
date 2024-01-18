@@ -440,7 +440,7 @@ def filter_explore(data: np.array, window_size: int = 500, plot: bool = False):
     None: This function does not return a value but rather plots the original and filtered data for comparison.
     """
     # Removing trend with boxcar moving avg
-    boxcar_detrended_data = remove_trend_boxcar(data, window_size = 500)
+    boxcar_detrended_data = remove_trend_boxcar(data, window_size = window_size)
 
     # Removing trend with bandpass, lowpass, highpass
     bandpassed, lowpassed, highpassed = remove_trend_bandpass(data, 1, 15, 1000)
@@ -463,7 +463,7 @@ def highpass_ephys(ephys, cutoff = 15, order = 3, fs = 1000):
     ephys_highpassed = np.zeros(ephys.shape)
 
     for ch in range(nchannels):
-        _, _, highpassed = remove_trend_bandpass(ephys[ch, :], 1, cutoff, fs)
+        _, _, highpassed = remove_trend_bandpass(ephys[ch, :], lowcut = cutoff, f = fs, order = order)
         ephys_highpassed[ch, :] = highpassed
 
     return ephys_highpassed
@@ -475,7 +475,7 @@ def lowpass_ephys(ephys, cutoff = 1, order = 3, fs = 1000):
     ephys_lowpassed = np.zeros(ephys.shape)
 
     for ch in range(nchannels):
-        _, lowpassed, _ = remove_trend_bandpass(ephys[ch, :], cutoff, 1000, fs)
+        _, lowpassed, _ = remove_trend_bandpass(ephys[ch, :], highcut = cutoff, f = fs, order = order)
         ephys_lowpassed[ch, :] = lowpassed
 
     return ephys_lowpassed
