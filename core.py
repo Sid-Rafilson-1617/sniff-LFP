@@ -839,10 +839,10 @@ def remove_trend_zscore(data: np.array) -> np.array:
 
 def remove_trend_bandpass(data: np.array, lowcut: float = 0.1, highcut: float = 20, order: int = 5, f = 1000) -> np.array:
 
-    sos_high = signal.butter(10, lowcut, btype='highpass', output = 'sos', fs = f)
+    sos_high = signal.butter(order, lowcut, btype='highpass', output = 'sos', fs = f)
     highpassed = signal.sosfiltfilt(sos_high, data)
 
-    sos_low = signal.butter(10, highcut, btype='lowpass', output = 'sos', fs = f)
+    sos_low = signal.butter(order, highcut, btype='lowpass', output = 'sos', fs = f)
     lowpassed = signal.sosfiltfilt(sos_low, data)
 
     bandpassed = signal.sosfiltfilt(sos_high, lowpassed)
