@@ -18,6 +18,7 @@ import pandas as pd
 from scipy import signal
 from scipy import stats
 from scipy.fft import fft, ifft
+from scipy.io import loadmat
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -37,6 +38,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.decomposition import PCA
+
+
 
 import umap
 
@@ -144,6 +147,40 @@ def load_tracking(tracking_file: str, num_samples = -1, start = 0, stop = 0) -> 
     return tracking
 
 
+def get_sniff_signal_MAT(sniff_file: str):
+    '''
+    Function to extract sniff signal from MATLAB file
+    '''
+    sniff_data = loadmat(sniff_file)
+    sniff_signal = sniff_data['sniff']
+    return sniff_signal
+
+def load_sniff_MATLAB(file: str) -> np.array:
+    '''
+    Loads a MATLAB file containing sniff data and returns a numpy array
+    '''
+
+    mat = loadmat(file)
+    sniff_params = mat['sniff_params']
+
+    # loading sniff parameters
+    inhalation_times = sniff_params[:, 0]
+    inhalation_voltage = sniff_params[:, 1]
+    exhalation_times = sniff_params[:, 2]
+    exhalation_voltage = sniff_params[:, 3]
+
+    # bad sniffs are indicated by 0 value in exhalation_times
+    bad_indices = np.where(exhalation_times == 0)
+
+
+    # removing bad sniffs
+    inhalation_times = np.delete(inhalation_times, bad_indices)
+    inhalation_voltage = np.delete(inhalation_voltage, bad_indices)
+    exhalation_times = np.delete(exhalation_times, bad_indices)
+    exhalation_voltage = np.delete(exhalation_voltage, bad_indices)
+
+    return inhalation_times.astype(np.int32), inhalation_voltage, exhalation_times.astype(np.int32), exhalation_voltage
+
 
 
 
@@ -198,6 +235,54 @@ def plot_ephys(ephys, plot_range = (0, -1), method = 'overlay'):
 
     plt.show()
 
+def plot_ephyssniff_new(ephys, sniff, inh, exh, plot_range = (0, -1)):
+
+    path = r"E:\Sid_LFP\figs\Poster"
+
+    nchannels = ephys.shape[0]
+
+    sns.set_style('white')
+    #sns.set_context('poster')
+
+    fig, axs = plt.subplots(2, 1, sharex=True, figsize=(20, 6))
+
+    # finding inhales and exhales in plot_range
+    inh = inh[(inh >= plot_range[0]) & (inh <= plot_range[1])]
+    exh = exh[(exh >= plot_range[0]) & (exh <= plot_range[1])]
+
+
+
+
+
+    colors = ['firebrick', 'forestgreen', 'steelblue']
+    for ch in range(nchannels):
+        sns.lineplot(x = np.arange(ephys.shape[1])[plot_range[0]:plot_range[1]] / 1_000, y = ephys[ch, plot_range[0]:plot_range[1]], ax = axs[0], color = colors[ch])
+    axs[0].set_title('LFP Signal')
+    axs[0].set_xlabel('Time (seconds)')
+    axs[0].set_ylabel('Voltage (mV)')
+
+    sns.lineplot(x = np.arange(sniff.shape[0])[plot_range[0]:plot_range[1]] / 1_000, y = sniff[plot_range[0]:plot_range[1]], ax = axs[1], color = 'black')
+    sns.scatterplot(x = inh / 1_000, y = sniff[inh], ax = axs[1], color = 'grey', s = 100)
+    sns.scatterplot(x = exh / 1_000, y = sniff[exh], ax = axs[1], color = 'grey', s = 100)
+    axs[1].set_title('Thermistor Signal')
+    axs[1].set_xlabel('Time (seconds)')
+    axs[1].set_ylabel('Temperature (a.u.)')
+  
+    # only show whole number x axis ticks
+    for ax in axs:
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+
+    sns.despine()
+
+    # making font black
+    plt.setp(axs[0].xaxis.get_majorticklabels(), color='black')
+
+    # increasing image quality
+    plt.savefig(os.path.join(path, 'ephys_sniff.png'), dpi = 300)
+    plt.close()
+
+
+
 
 def plot_ephyssniff(ephys, sniff, plot_range = (0, -1)):
 
@@ -213,27 +298,30 @@ def plot_ephyssniff(ephys, sniff, plot_range = (0, -1)):
     nchannels = ephys.shape[0]
 
     # Create subplots based on the number of channels
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 12))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 12), layout = 'constrained')
 
+    colors = ['firebrick', 'olivedrab', 'steelblue']
+    print('plotting ephys signal')
     # plotting ephys signal
     for ch in range(nchannels):
-        ax1.plot(ephys[ch, plot_range[0]:plot_range[1]])
-        ax1.set_title('Ephys Signal')
-        ax1.set_xlabel('Time (s)')
-        ax1.set_ylabel('Voltage')
-        ax1.legend([f'Channel {ch + 1}' for ch in range(nchannels)])
+        color = colors[ch % len(colors)]
+        ax1.plot(ephys[ch, plot_range[0]:plot_range[1]], color = color)
+        ax1.set_title('LFP (1-15 Hz)')
+        ax1.set_ylabel('Voltage (au)')
+        ax1.legend(['Channel 1','Channel 3', 'Channel 5'])
+        #ax1.legend([f'Channel {ch + 1}' for ch in range(nchannels)])
+    print('plotting sniff signal')
 
     # plotting sniff signal    
     ax2.plot(sniff[plot_range[0]:plot_range[1]] * 1000, 'k')
-    ax2.set_title('Sniff Signal')
+    ax2.set_title('Thermistor')
     ax2.set_xlabel('Time (s)')
-    ax2.set_ylabel('Voltage')
+    ax2.set_ylabel('Voltage (mV)')
 
     # formatting x-axis
     ax1.xaxis.set_major_formatter(formatter)
     ax2.xaxis.set_major_formatter(formatter)
-
-
+    print('showing plot')
     plt.show()
 
 
@@ -247,7 +335,7 @@ def plot_sniff_hist(freqs: np.array):
     plt.show()
 
 
-def plot_snifflocked_lfp_single(lfp: np.array, freqs: np.array, ch = 1, show_y = True, show_x = True, subtitle: str = ''):
+def plot_snifflocked_lfp_single(lfp: np.array, freqs: np.array, save_path: str, ch = 1, show_y = True, show_x = True):
     window_size = lfp.shape[2]
     x_middle = window_size // 2
 
@@ -255,7 +343,7 @@ def plot_snifflocked_lfp_single(lfp: np.array, freqs: np.array, ch = 1, show_y =
     y_ticks_labels = [f'{freqs[i]:.1f}' for i in y_ticks]
 
     
-
+    plt.figure()
     im = plt.imshow(lfp[ch-1, :, :], aspect='auto', cmap = 'seismic')
 
 
@@ -282,7 +370,9 @@ def plot_snifflocked_lfp_single(lfp: np.array, freqs: np.array, ch = 1, show_y =
         ax.set_yticklabels([])
 
     plt.colorbar(im)
-    plt.show()
+    plt.savefig(save_path + f'Channel_{ch}_raster.png')
+    plt.close()
+    plt.cla()
 
 
 def plot_snifflocked_lfp_3d(lfp: np.array, freqs: np.array, show_y = False, subtitle: str = ''):
@@ -578,7 +668,7 @@ def plot_normality(circular_null: np.array, niters: int = 1000, step_size: int =
     return sig_ratios
 
 
-def plot_avg_infreq_lfp(avg_activity: np.array, freq_range: tuple, ch = 1, yaxis = 'voltage') -> None:
+def plot_avg_infreq_lfp(avg_activity: np.array, save_path: str, freq_range: tuple, ch = 1, yaxis = 'voltage') -> None:
 
     window_size = avg_activity.shape[1]
     x_middle = window_size // 2
@@ -597,7 +687,8 @@ def plot_avg_infreq_lfp(avg_activity: np.array, freq_range: tuple, ch = 1, yaxis
     ax.set_xticks([x_middle - window_size/2, x_middle, x_middle + window_size/2])
     ax.set_xticklabels([-window_size/2, '0', window_size/2])
 
-    plt.show()
+    plt.savefig(os.path.join(save_path, f'Channel_{ch}_avg_lfp.png'))
+    plt.close()
 
 
 def plot_binned_reduced_ephys(reduced_df: pd.DataFrame, n_bins = 10):
@@ -856,7 +947,123 @@ def smooth_waveform(waveform: np.array):
     smoothed_waveform = signal.savgol_filter(waveform, 51, 3)
     return smoothed_waveform
 
+def find_condition_mask_inhales(events, len_sniff: int):
 
+    # finding start and end times of free moving
+    freemoving_start = events[0,3]
+    if events[1,2] != 0:
+        freemoving_end = events[1,2]
+    else:
+        freemoving_end = len_sniff - 1
+
+    # finding floor flip times
+    floorflip_start = events[2,2]
+    floorflip_end = events[2,3]
+
+    # removing floor flip times from freemoving times if applicable
+    if floorflip_start != 0:
+        freemoving_mask = np.concatenate((np.arange(freemoving_start, floorflip_start), np.arange(floorflip_end, freemoving_end))).astype(int)
+    else:
+        freemoving_mask = np.arange(freemoving_start, freemoving_end).astype(int)
+    
+    # finding initial headfixed start and end times
+    headfix_i_start = 0
+    if events[0,2] != 0:
+        headfix_i_end = events[0,2]
+    else:
+        headfix_i_end = (events[0,3] - 1000) # subtracting 10 seconds when mouse is headfixed outside arena
+    headfix_i_mask = np.arange(headfix_i_start, headfix_i_end)
+
+    # finding final headfixed start and end times
+    headfix_f_end = len_sniff - 1
+    if events[1,3] != 0:
+        headfix_f_start = events[1,3]
+    else:
+        if events[1,2] != 0:
+            headfix_f_start = (events[1,2] + 100)# adding 10 seconds when mouse is headfixed outside arena
+        else:
+            headfix_f_start = len_sniff - 1
+
+
+    headfix_f_mask = np.arange(headfix_f_start, headfix_f_end)
+
+    if len(headfix_f_mask) < 4 * 60 * 100:
+        headfix_f_mask = []
+
+    # defining headfixed mask
+    headfixed_mask = np.round(np.concatenate((headfix_i_mask, headfix_f_mask))).astype(int)
+
+
+
+    return freemoving_mask, headfixed_mask
+
+
+
+def find_condition_mask(events, sniff, get_bool = True):
+
+    sniff = sniff.flatten()
+    len_sniff = sniff.shape[0]
+
+    # finding start and end times of free moving
+    freemoving_start = events[0,3]
+    if events[1,2] != 0:
+        freemoving_end = events[1,2]
+    else:
+        freemoving_end = len_sniff - 1
+
+    # finding floor flip times
+    floorflip_start = events[2,2]
+    floorflip_end = events[2,3]
+
+    # removing floor flip times from freemoving times if applicable
+    if floorflip_start != 0:
+        freemoving_mask = np.concatenate((np.arange(freemoving_start, floorflip_start), np.arange(floorflip_end, freemoving_end))).astype(int)
+    else:
+        freemoving_mask = np.arange(freemoving_start, freemoving_end).astype(int)
+    
+    # finding initial headfixed start and end times
+    headfix_i_start = 0
+    if events[0,2] != 0:
+        headfix_i_end = events[0,2]
+    else:
+        headfix_i_end = (events[0,3] - 1000) # subtracting 10 seconds when mouse is headfixed outside arena
+    headfix_i_mask = np.arange(headfix_i_start, headfix_i_end)
+
+    # finding final headfixed start and end times
+    headfix_f_end = len_sniff - 1
+    if events[1,3] != 0:
+        headfix_f_start = events[1,3]
+    else:
+        if events[1,2] != 0:
+            headfix_f_start = (events[1,2] + 100)# adding 10 seconds when mouse is headfixed outside arena
+        else:
+            headfix_f_start = len_sniff - 1
+
+
+    headfix_f_mask = np.arange(headfix_f_start, headfix_f_end)
+
+    if len(headfix_f_mask) < 4 * 60 * 100:
+        headfix_f_mask = []
+
+    # defining headfixed mask
+    headfixed_mask = np.round(np.concatenate((headfix_i_mask, headfix_f_mask))).astype(int)
+
+    if get_bool:
+        # definings boolean masks
+        bool_length = np.zeros(len(sniff), dtype=bool)
+        if freemoving_mask.size != 0:
+            bool_length[freemoving_mask] = True
+        freemoving_bool = bool_length
+
+        bool_length = np.zeros(len(sniff), dtype=bool)
+        if headfixed_mask.size != 0:
+            bool_length[headfixed_mask] = True
+        headfixed_bool = bool_length
+
+        return freemoving_mask, headfixed_mask, freemoving_bool, headfixed_bool
+
+    else:
+        return freemoving_mask, headfixed_mask
 #_________________________________________________________________________________________________PREPROCESSING TRACKING________________________________________________________________________________________________________________________________
 
 def find_velocity(tracking: np.array, keypoint = 'centroid', returns = 'magnitude') -> np.array:
@@ -949,9 +1156,61 @@ def find_angular_velocity(tracking: np.array) -> np.array:
 
 
 #________________________________________________________________________________________________________ALIGNMENT_________________________________________________________________________________________________________________________________________
+def find_inhales_2(data: np.array, window_length = 51, polyorder = 5, min_peak_prominance = 0.3, distance = 50, show = False, signal_type = 'sniff', save_figs = False, name = None, f = 1000) -> np.array:
+
+    inhale_times = []
+
+    # smoothing the signal
+    data_smooth = signal.savgol_filter(data, window_length, polyorder)
+    
+    # defining windows to work in
+    windows = np.round(np.arange(0, len(data_smooth), (5*f))).astype(int)
+
+    # preallocating zscored signal array
+    zsniff = np.zeros(len(windows))
+
+    # looping through windows
+    for scan in range(1, len(windows)):
+
+        # defining time stamp
+        time_stamp = ((windows[scan - 1]), windows[scan])
+
+        # zscoring the signal
+        zsniff = stats.zscore(data_smooth[time_stamp[0]:time_stamp[1]])
+
+        # finding peaks
+        [locs, properties] = signal.find_peaks(zsniff, height = (None, None), prominence = min_peak_prominance, distance = distance)
+
+        # finding inhale times and appending to list
+        for peak in range(len(locs)):
+            inhale = locs[peak]
+            if inhale:
+                inhale_times.append(inhale + time_stamp[0])
+
+    # plotting
+    if show == True:
+        plt.figure(figsize=(10, 6))
+        plt.plot(inhale_times, data_smooth[inhale_times], 'x', label='Peaks')
+
+        if signal_type == 'sniff':
+            plt.plot(data, label='Original Sniff Signal')
+            plt.plot(data_smooth, label='Smoothed Sniff Signal')
+            plt.title('Sniff Signal and Identified Peaks')
+
+        elif signal_type == 'lfp':
+            plt.plot(data, label='Original LFP Signal')
+            plt.plot(data, label='Smoothed LFP Signal')
+            plt.title('LFP Signal and Identified Peaks\n')
+            
+        plt.xlabel('Sample')
+        plt.ylabel('Signal Amplitude')
+        plt.legend()
+        plt.show()
+
+    return inhale_times
 
 
-def find_inhales(data: np.array, window_length = 101, polyorder = 9, min_peak_prominance = 75, show = False, signal_type = 'sniff') -> np.array:
+def find_inhales(data: np.array, window_length = 51, polyorder = 5, min_peak_prominance = 75, distance = 70, show = False, signal_type = 'sniff', save_figs = False, save_path: str = '', name = None) -> np.array:
     '''
     Smooth a  signal using the Savitzky-Golay method and locate inhalation times using peak finding.
 
@@ -975,27 +1234,35 @@ def find_inhales(data: np.array, window_length = 101, polyorder = 9, min_peak_pr
            - smoothed_sniff (np.array): The smoothed sniff signal.
     '''
 
-
+    sns.set_style('darkgrid')
     smoothed_data = signal.savgol_filter(data, window_length, polyorder)
-    locs, properties = signal.find_peaks(smoothed_data, height = (None, None), prominence = min_peak_prominance)
+    locs, properties = signal.find_peaks(smoothed_data, height = (None, None), prominence = min_peak_prominance, distance = distance)
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(locs, smoothed_data[locs], 'x', label='Peaks')
+
+    if signal_type == 'sniff':
+        plt.plot(data, label='Original Sniff Signal')
+        plt.plot(smoothed_data, label='Smoothed Sniff Signal')
+        plt.title('Sniff Signal and Identified Peaks')
+
+    elif signal_type == 'lfp':
+        plt.plot(data, label='Original LFP Signal')
+        plt.plot(smoothed_data, label='Smoothed LFP Signal')
+        plt.title('LFP Signal and Identified Peaks\n')
+        
+    plt.xlabel('Sample')
+    plt.ylabel('Signal Amplitude')
+    plt.legend()
+
     if show == True:
-        plt.figure(figsize=(10, 6))
-        plt.plot(locs, smoothed_data[locs], 'x', label='Peaks')
-
-        if signal_type == 'sniff':
-            plt.plot(data, label='Original Sniff Signal')
-            plt.plot(smoothed_data, label='Smoothed Sniff Signal')
-            plt.title('Sniff Signal and Identified Peaks')
-
-        elif signal_type == 'lfp':
-            plt.plot(data, label='Original LFP Signal')
-            plt.plot(smoothed_data, label='Smoothed LFP Signal')
-            plt.title('LFP Signal and Identified Peaks')
-            
-        plt.xlabel('Sample')
-        plt.ylabel('Signal Amplitude')
-        plt.legend()
         plt.show()
+
+    if save_figs == True:
+        name = name + '.png'
+        plt.savefig(os.path.join(save_path, name))
+
+    plt.close()
     return locs, smoothed_data, properties
 
 
@@ -1031,7 +1298,7 @@ def sniff_lock_lfp(locs: np.array, ephys: np.array, window_size = 1000, nsniffs 
 
     # finding the set of inhalation times to use
     if nsniffs == 'all':
-        loc_set = locs[20:-20]
+        loc_set = locs[50:-50]
         nsniffs = len(loc_set)
     elif isinstance(nsniffs, int):
         first_loc = np.argmax(locs >= beg)
@@ -1069,6 +1336,9 @@ def sniff_lock_lfp(locs: np.array, ephys: np.array, window_size = 1000, nsniffs 
             for ch in range(nchannels):
                 win_beg, win_end = windows[ii]
                 data = ephys[ch, win_beg:win_end]
+                if len(data) < window_size:
+                    data = np.pad(data, (0, window_size - len(data)), mode = 'constant', constant_values = 0)
+                    print('!!! padding !!!')
                 sniff_activity[ch,ii,:] = data
 
     return sniff_activity, loc_set
@@ -1223,7 +1493,7 @@ def bin_sniff_times(inter_sniff_time: np.array, bin_size = 200) -> np.array:
 
 
 
-def pull_infreq_lfp(sniff_activity: np.array, freqs: np.array, freq_range: tuple) -> (np.array, np.array):
+def pull_infreq_lfp(sniff_activity: np.array, freqs: np.array, freq_range: tuple):
     '''pulls the ephys voltage at each channel at each inhalation for sniffs with frequencies in freq_range'''
 
     # finding data shape
@@ -1263,15 +1533,12 @@ def avg_infreq_lfp(infreq_sniff_activity: np.array) -> np.array:
     return avg_activity
 
 
-    
-
-
 
 #_____________________________________________________________________________________________________FREQUENCY ANALYSIS________________________________________________________________________________________________________________________________
 
 
 
-def PSD_sniff(sniff: np.array, show = False) -> np.array:
+def PSD_sniff(sniff: np.array, show: bool = False) -> np.array:
     '''
     Power Spectral Density transform on sniff signal
     '''
@@ -1290,6 +1557,7 @@ def PSD_sniff(sniff: np.array, show = False) -> np.array:
     return frequencies, PSD
 
 
+
 def PSD_ephys(ephys: np.array, show = False) -> np.array:
 
     # finding number of channels
@@ -1299,7 +1567,7 @@ def PSD_ephys(ephys: np.array, show = False) -> np.array:
     frequencies = None
     PSDs = None
     for ch in range(nchannels):
-        f, p = signal.welch(ephys[ch,:], 1000)
+        f, p = signal.welch(ephys[ch,:], 1000, nperseg = 100_000, noverlap = 10_000)
 
         # saving frequencies and PSDs for each channel
         if frequencies is None:
@@ -1321,6 +1589,11 @@ def PSD_ephys(ephys: np.array, show = False) -> np.array:
         elif nchannels == 64:
             fig, axs = plt.subplots(8, 8, figsize=(6, 6))
             fig.subplots_adjust(hspace=0.1, wspace=0.1)
+        elif nchannels == 1:
+            fig, axs = plt.subplots(1, 1, figsize=(6, 6))
+            fig.subplots_adjust(hspace=0.1, wspace=0.1)
+        else:
+            raise ValueError("Number of channels must be 16, 32, or 64.")
         
         fig.suptitle('LFP Power Spectrum', fontsize=16)
         
@@ -1331,6 +1604,8 @@ def PSD_ephys(ephys: np.array, show = False) -> np.array:
                 ax = axs[ch // 6, ch % 6]
             elif nchannels ==64:
                 ax = axs[ch // 8, ch % 8]
+            elif nchannels == 1:
+                ax = axs
 
             # Plotting each channel
             cax = ax.plot(frequencies[ch, :], PSDs[ch, :])
@@ -1349,8 +1624,38 @@ def PSD_ephys(ephys: np.array, show = False) -> np.array:
     return frequencies, PSDs
         
 
+def multitaper_PSD_ephys(data: np.array, frequency_range: int = 500, sampling_rate = 1000, single_taper_duration = 0.4, overlap = 0.1, ntapers = 5) -> np.array:
+
+    import multitaper as mt
+
+    # calculate sampling interval
+    sampling_interval = 1 / sampling_rate
+
+    # Estimating PSD for each channel using Thomson's multitaper method
+    f, t, quad, MT = mt.mtspec.spectrogram(data, sampling_interval, single_taper_duration, nw = 3.5, olap = overlap, kspec = ntapers, fmax = frequency_range)
+
+    return f, t, quad, MT
 
 
+def multitaper_cross_spectrum(data1: np.array, data2: np.array, sampling_rate = 1000, ntapers = 7) -> np.array:
+    
+    import multitaper as mt
+
+    # calculate sampling interval
+    sampling_interval = 1 / sampling_rate
+
+    mt_cross = mt.MTCross(data1, data2, nw = 3.5, kspec = ntapers, dt = sampling_interval, nfft = 500)
+
+    cross = mt_cross.Sxy
+    xspec = mt_cross.Sxx
+    yspec = mt_cross.Syy
+    freqs = mt_cross.freq
+
+    cross = np.abs(cross)
+    xspec = np.abs(xspec)
+    yspec = np.abs(yspec)
+
+    return cross, xspec, yspec, freqs
 
 
 #_________________________________________________________________________________________________________CIRCULAR SHIFT AND NULL DISTRIBUTIONS_____________________________________________________________________________________________________________________________________________
@@ -1402,7 +1707,8 @@ def circular_shift(ephys: np.array, nshifts: int = 1000, method: str = 'sample',
         # shifting the ephys signal with nshifts random shifts
         for ii in range(nshifts):
             random_shift = np.random.randint(min_shift, signal_length)
-            circ_ephys[:,:,ii] = np.roll(ephys, random_shift, axis = 1)
+            current_roll = np.roll(ephys, random_shift, axis = 1)
+            circ_ephys[:,:,ii] = current_roll
 
     return circ_ephys
 
