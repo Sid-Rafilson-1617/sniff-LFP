@@ -8,6 +8,7 @@ Description: A Python library for analyzing time-domain signals from olfactory b
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 import scipy.io
 from scipy import stats
 from scipy.signal import butter, sosfiltfilt
@@ -579,10 +580,35 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
 
 
 
-#______________________________________________________________________________MAIN FUNCTION_______________________________________________________________________________#
+#______________________________________________________________________________MAIN FUNCTIONS_______________________________________________________________________________#
 
 
-def LFP_sniff_analysis(data_dir: str, save_dir: str, window_size = 1_000, nshifts = 100, mice = ['1410', '1412', '4122', '4127', '4131', '4138']):
+
+def build_all_rasters(data_dir: str, save_dir: str, window_size = 1_000, nshifts = 100, mice = ['1410', '1412', '4122', '4127', '4131', '4138']):
+
+    """
+    Main function for processing and analyzing LFP and sniff data across multiple mice and sessions.
+
+    This function orchestrates the workflow for analyzing olfactory bulb local field potentials (LFPs) and sniff data.
+    It reads data from the specified directory, performs specified analyses, and saves the results. The function handles
+    multiple mice and sessions, applies various filters, calculates z-scores, and organizes the output data into a structured format.
+
+    Parameters:
+    - data_dir (str): Path to the directory containing the data files.
+    - save_dir (str): Path to the directory where the results will be saved.
+    - window_size (int, optional): Size of the window for analysis in milliseconds. Defaults to 1000.
+    - nshifts (int, optional): Number of circular shifts used for generating null distributions in z-score calculations. Defaults to 100.
+    - mice (list of str, optional): List of mouse IDs to include in the analysis. If None, all mice in the directory will be processed.
+
+    Examples:
+    - To run analysis for specific mice with custom settings:
+        >>> LFP_sniff_analysis('path/to/data', 'path/to/save', window_size=500, nshifts=50, mice=['1410', '1412'])
+
+    Notes:
+    - The function expects each mouse's data to be in a separate subdirectory named after the mouse ID within `data_dir`.
+    - Each session within a mouse's directory should contain 'LFP.npy', 'sniff_params.mat', and 'events.mat' files.
+    - The results are saved in a structured directory format, preserving the organization of mice and sessions.
+    """
 
     files = os.listdir(data_dir)
     for file in files:
@@ -615,10 +641,89 @@ def LFP_sniff_analysis(data_dir: str, save_dir: str, window_size = 1_000, nshift
                     
                     # saving zscores
                     np.save(os.path.join(save_path, f'{filter}_z_scores.npy'), zscores)
-                
       
 
 
+def plot_and_save_rasters(data_dir: str, save_dir: str, filters = ['lowpass', 'highpass', 'bandpass'], mice = ['1410', '1412', '4122', '4127', '4131', '4138']):
+
+
+
+    sns.set_context('talk')
+    for mouse in mice:
+        mouse_dir = os.path.join(data_dir, mouse)
+        if not os.path.exists(mouse_dir):
+            print(f'skipping mouse {mouse} due to missing directory')
+            continue
+        sessions = os.listdir(mouse_dir)
+        for session in sessions:
+            session_dir = os.path.join(mouse_dir, session)
+
+            # checking neccessary files exist
+            required_files = ['lowpass_z_scores.npy', 'highpass_z_scores.npy', 'bandpass_z_scores.npy']
+            if not all(file in os.listdir(session_dir) for file in required_files):
+                print(f'skipping mouse {mouse} session {session} due to missing files')
+                continue
+
+            # loading data
+            for filter in filters:
+                zscores = np.load(os.path.join(session_dir, f'{filter}_z_scores.npy'))
+
+                for condition in range(zscores.shape[0]):
+                    for channel in range(zscores.shape[1]):
+
+                        if condition == 0:
+                            condition_name = 'freemoving'
+                        else:
+                            condition_name = 'headfixed'
+
+                        title = f'{mouse} session {session} {filter} {condition_name} channel {channel}'
+
+                        save_path = os.path.join(save_dir, mouse, session, filter)
+                        if not os.path.exists(save_path):
+                            os.makedirs(save_path)
+
+                        data_use = zscores[condition, channel, :, :].T
+                        bounds = np.max(np.abs(data_use))
+                        window_size = data_use.shape[1]
+                        nbins = data_use.shape[0]
+
+                        plt.figure(figsize = (12, 7))
+                        sns.heatmap(data_use, cmap = 'seismic', center = 0, robust = True, vmin = -bounds, vmax = bounds)
+                        plt.gca().invert_yaxis()
+
+                        # plotting vertical line in middle of window
+                        plt.axvline(window_size // 2, color = 'black', linestyle = '--')
+
+                        # getting next inhalation time from frequency
+                        next_inhale = np.zeros((nbins + 1))
+                        for i in range(nbins + 1):
+                            next_inhale[i] = (window_size / 2) + (1000 // (2 + i))
+
+                        x = next_inhale
+                        y = np.arange(0, nbins + 1)
+                        sns.lineplot(x = x, y = y, linestyle = '--', alpha = 0.8, color = 'black')
+
+                        # setting x ticks so middle tick is 0
+                        xticks = [0, 1000, 2000]
+                        xtick_labels = [-1, 0, 1]
+                        plt.xticks(xticks, xtick_labels)
+                        plt.xlabel('Time (s)')
+
+                        plt.tick_params(axis = 'x', labelrotation = 0)
+
+                        # setting y ticks
+                        yticks =[0, 2, 4, 6, 8, 10]
+                        ytick_labels = [2, 4, 6, 8, 10, 12]
+                        plt.yticks(yticks, ytick_labels)
+                        plt.ylabel('Frequency (Hz)')
+
+                        # setting title
+                        plt.title(title)
+
+                        name = f'{condition_name}_channel_{channel}'
+
+                        plt.savefig(os.path.join(save_path, f'{name}.png'), dpi = 300)
+                        plt.close()
 
 
 
