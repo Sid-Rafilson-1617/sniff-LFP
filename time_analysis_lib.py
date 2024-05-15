@@ -7,11 +7,13 @@ Description: A Python library for analyzing time-domain signals from olfactory b
 
 import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import seaborn as sns
 import scipy.io
 from scipy import stats
-from scipy.signal import butter, sosfiltfilt
+import scipy.signal as signal
 
 
 #______________________________________________________________________________CORE FUNCTIONS______________________________________________________________________________#
@@ -434,7 +436,7 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
     - LFP (numpy.ndarray): An array of shape (n_channels, n_samples) representing the LFP data.
     - sniff_times (numpy.ndarray): An array of timestamps indicating sniff times.
     - events (numpy.ndarray): An array containing event markers and conditions.
-    - filter (str, optional): Type of filter to apply to the LFP data. Supported values are 'lowpass', 'highpass', 'bandpass'. Default is None.
+    - filter (str, optional): Type of filter to apply to the LFP data. Supported values are 'lowpass', 'highpass', and 'bandpass'. Default is None.
     - cutoff (int or tuple, optional): Cutoff frequency/frequencies for the filter. If 'bandpass', a tuple of (low, high) is expected. Default is 24.
     - nbins (int, optional): Number of bins to divide the frequency range into. Default is 10.
     - freq_range (tuple, optional): Tuple indicating the frequency range to analyze, given as (low, high) in Hz. Default is (2, 12).
@@ -445,20 +447,16 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
 
     Returns:
     - numpy.ndarray: A 4D array of z-scores with dimensions corresponding to (condition, channels, window size, bins).
-    - numpy.ndarray: An array of average frequencies for each condition and bin.
 
     Raises:
     - ValueError: If an invalid filter type is provided.
 
     Examples:
     - To build a binned raster without filtering:
-    >>> z_scores, avg_frequencies = build_binned_raster(LFP_data, sniff_timestamps, event_markers)
+    >>> z_scores = build_binned_raster(LFP_data, sniff_timestamps, event_markers)
 
     - To apply a lowpass filter:
-    >>> z_scores, avg_frequencies = build_binned_raster(LFP_data, sniff_timestamps, event_markers, filter='lowpass', cutoff=24)
-
-    - To apply a bandpass filter:
-    >>> z_scores, avg_frequencies = build_binned_raster(LFP_data, sniff_timestamps, event_markers, filter='bandpass', cutoff=(2, 12))
+    >>> z_scores = build_binned_raster(LFP_data, sniff_timestamps, event_markers, filter='lowpass', cutoff=24)
     """
 
     # getting number of channels
@@ -467,11 +465,14 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
     # filtering signal
     order = 5
     if filter == 'lowpass':
-        signal = lowpass_ephys(LFP, cutoff, order)
+        sos = signal.butter(order, cutoff, 'low', fs = f, output = 'sos')
+        signal = signal.sosfiltfilt(sos, LFP, axis = 1)
     elif filter == 'highpass':
-        signal = highpass_ephys(LFP, cutoff, order)
+        sos = signal.butter(order, cutoff, 'high', fs = f, output = 'sos')
+        signal = signal.sosfiltfilt(sos, LFP, axis = 1)
     elif filter == 'bandpass':
-        signal = highpass_ephys(lowpass_ephys(LFP, cutoff[0], order), cutoff[1], order)
+        sos = signal.butter(order, cutoff, 'band', fs = f, output = 'sos')
+        signal = signal.sosfiltfilt(sos, LFP, axis = 1)
     else:
         signal = LFP
 
@@ -582,10 +583,7 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
 
 
 
-
-
-
-#______________________________________________________________________________MAIN FUNCTIONS_______________________________________________________________________________#
+#______________________________________________________________________________MAIN FUNCTION_______________________________________________________________________________#
 
 
 
@@ -624,13 +622,12 @@ def build_all_rasters(data_dir: str, save_dir: str, window_size = 1_000, nshifts
                     # saving zscores
                     np.save(os.path.join(save_path, f'{filter}_z_scores.npy'), zscores)
                     np.save(os.path.join(save_path, f'{filter}_freqs.npy'), freqs)
-        
+            
 
 
 def plot_and_save_rasters(data_dir: str, save_dir: str, filters = ['lowpass', 'highpass', 'bandpass'], mice = ['1410', '1412', '4122', '4127', '4131', '4138']):
 
-
-
+  
     sns.set_context('talk')
     for mouse in mice:
         mouse_dir = os.path.join(data_dir, mouse)
@@ -706,8 +703,364 @@ def plot_and_save_rasters(data_dir: str, save_dir: str, filters = ['lowpass', 'h
                         name = f'{condition_name}_channel_{channel}'
 
                         plt.savefig(os.path.join(save_path, f'{name}.png'), dpi = 300)
+                        plt.clf()
                         plt.close()
 
+
+
+def analyze_rasters(data_dir: str, save_dir: str, filter: str = 'lowpass', mice: list[str] = ['1410', '1412', '4122', '4127', '4131', '4138'], show_peakfinder: bool = False):
+    """
+    Analyzes raster plot data for specified mice by processing LFP (local field potential) data.
+    The function applies a specified filter (lowpass by default) and performs peak and trough detection
+    on smoothed LFP signals. Results are plotted optionally and saved in a CSV file.
+
+    Parameters:
+    - data_dir (str): Directory containing the data for different mice and sessions.
+    - save_dir (str): Directory where the analysis results will be saved.
+    - filter (str, optional): Type of filter to apply to the LFP data ('lowpass' or 'highpass'). Defaults to 'lowpass'.
+    - mice (List[str], optional): List of mouse IDs as strings to analyze. Defaults to ['1410', '1412', '4122', '4127', '4131', '4138'].
+    - show_peakfinder (bool, optional): If True, generates and saves plots showing peak and trough detection results. Defaults to False.
+
+    Returns:
+    - None: The function saves the analysis results directly to files and does not return any value.
+
+    The function iterates over each mouse and session, loads the LFP data, applies smoothing and peak/trough detection,
+    and aggregates the results across conditions ('freemoving' and 'headfixed'). Data for peak-to-peak and peak-to-trough
+    frequencies, as well as peak heights and trough depths, are stored and saved after each session's analysis is completed.
+
+    Example usage:
+    analyze_rasters("/path/to/data", "/path/to/save", filter='highpass', show_peakfinder=True)
+    """
+
+    # creating dataframe to store results
+    df = pd.DataFrame(columns = ['mouse', 'session', 'condition', 'ephys_freqs_p2p', 'ephys_freqs_p2t', 'freqs', 'heights', 'dips', 'mid_peak', 'mid_trough'])
+
+    # setting parameters based on filter type
+    if filter =='highpass':
+        polyorder = 5
+        min_peak_prominance = 1
+        wl = 50
+    else:
+        polyorder = 5
+        min_peak_prominance = 3
+        wl = 150
+
+    # looping through each mouse
+    for mouse in mice:
+        print(f'Working on mouse {mouse}...')
+        mouse_dir = os.path.join(data_dir, mouse)
+        if not os.path.exists(mouse_dir):
+            print(f'skipping mouse {mouse} due to missing directory')
+            continue
+
+        # looping through each session
+        sessions = os.listdir(mouse_dir)
+        for session in sessions:
+            print(f'Working on session {session}...')
+            session_dir = os.path.join(mouse_dir, session)
+
+            # checking neccessary files exist
+            required_files = [f'{filter}_z_scores.npy']
+            if not all(file in os.listdir(session_dir) for file in required_files):
+                print(f'skipping mouse {mouse} session {session} due to missing files')
+                continue
+
+            # loading data
+            zscores = np.load(os.path.join(session_dir, f'{filter}_z_scores.npy'))
+            load_freqs = np.load(os.path.join(session_dir, f'{filter}_freqs.npy'))
+
+            # looping through each condition
+            for c in range(zscores.shape[0]):
+                if c == 0:
+                    condition = 'freemoving'
+                else:
+                    condition = 'headfixed'
+
+                # getting dimensions of zscores
+                nbins = zscores.shape[3]
+                nchannels = zscores.shape[1]
+                
+
+                # preallocating arrays to hold results
+                ephys_freqs_p2p = np.zeros((nbins, nchannels))
+                ephys_freqs_p2t = np.zeros((nbins, nchannels))
+                freqs = np.zeros((nbins, nchannels))
+                heights = np.zeros((nbins, nchannels))
+                dips = np.zeros((nbins, nchannels))
+                mid_peak = np.zeros((nbins, nchannels))
+                mid_trough = np.zeros((nbins, nchannels))
+
+                # looping through each channel
+                for channel in range(nchannels):
+                    for bin in range(nbins):
+
+                        # getting current frequency range
+                        current_range = (2 + bin / 2, 2 + (bin + 1) / 2)
+
+                        # getting zscored data
+                        data = zscores[c, channel, :, bin]
+
+                        # getting window size
+                        window_size = data.shape[0]
+
+                        # smoothing data
+                        smoothed_data = signal.savgol_filter(data, wl, polyorder)
+
+                        # finding peaks and troughs
+                        peaks, _ = signal.find_peaks(smoothed_data, prominence = min_peak_prominance)
+                        troughs, _ = signal.find_peaks(-smoothed_data, prominence = min_peak_prominance)
+
+                        # preallocating arrays to hold peak and trough heights
+                        peak_heights = []
+                        trough_dips = []
+                        peak_location = []
+                        trough_location = []
+
+                        # finding peak and trough heights by scanning in small window around peak of smoothed signal
+                        for peak in peaks:
+                            start_peak = max(peak - 20, 0)
+                            end_peak = min(peak + 20, window_size)
+                            window_peak = data[start_peak:end_peak]
+                            max_height = np.max(window_peak)
+                            peak_heights.append(max_height)
+                            peak_location.append(np.where(data == max_height)[0][0])
+                        
+                        for trough in troughs:
+                            start_trough = max(trough - 20, 0)
+                            end_trough = min(trough + 20, window_size)
+                            window_trough = data[start_trough:end_trough]
+                            min_height = np.min(window_trough)
+                            trough_dips.append(min_height)
+                            trough_location.append(np.where(data == min_height)[0][0])
+
+                        #finding peak nearest to middle of window
+                        if len(peak_location) > 0:
+                            middle_peak = np.min(np.abs(np.array(peak_location) - window_size // 2))
+                            middle_peak_index = np.argmin(np.abs(np.array(peak_location) - window_size // 2))
+                        else:
+                            middle_peak = 0
+                            middle_peak_index = np.inf
+
+                        #finding trough nearest to middle of window
+                        if len(trough_location) > 0:
+                            middle_trough = np.min(np.abs(np.array(trough_location) - window_size // 2))
+                            middle_trough_index = np.argmin(np.abs(np.array(trough_location) - window_size // 2))
+                        else:
+                            middle_trough = 0
+                            middle_trough_index = np.inf
+
+
+                        # plotting peaks and troughs
+                        if show_peakfinder:
+                            
+                            save_path = os.path.join(save_dir, mouse, session, filter, condition, str(channel))
+                            if not os.path.exists(save_path):
+                                os.makedirs(save_path)
+
+                            plt.figure(figsize=(10,6))
+                            sns.lineplot(x = np.arange(window_size), y = data, label = 'z-scored lfp', color = 'dodgerblue')
+                            sns.lineplot(x = np.arange(window_size), y = smoothed_data, label = 'smoothed lfp', color = 'crimson')
+                            sns.scatterplot(x = peak_location, y = peak_heights, label = 'peaks', color = 'black')
+                            sns.scatterplot(x = trough_location, y = trough_dips, color = 'black')
+                            plt.xticks(np.arange(0, window_size, 250), np.arange(-window_size // 2, window_size // 2, 250))
+                            plt.axvline(window_size // 2, color = 'grey', linestyle = '--', label = 'inhalation', alpha = 0.8)
+                            plt.xlabel('Time (ms)')
+                            plt.ylabel('Amplitude')
+                            plt.title(f'Peak and Trough Detection \n frequencies: {current_range} Hz')
+                            plt.legend()
+                            plt.savefig(os.path.join(save_path, f"freqs_{current_range}.png"))
+                            plt.clf()
+                            plt.close()
+                        
+                        # calculating instantaneous lfp frequency from peak and trough times
+                        if len(peak_location) > middle_peak_index + 1:
+                            peak2peak = 1000 / (peak_location[middle_peak_index + 1] - peak_location[middle_peak_index])
+                        else:
+                            peak2peak = 0
+                        
+                        if len(trough_location) > middle_trough_index + 1:
+                            peak2trough = 1000 / (trough_location[middle_trough_index] - peak_location[middle_peak_index])
+
+                        # handling edge cases
+                        if len(peak_heights) == 0:
+                            peak_heights = [0]
+                        if len(trough_dips) == 0:
+                            trough_dips = [0]
+                        
+                        # saving results
+                        ephys_freqs_p2p[bin, channel] = np.abs(peak2peak)
+                        ephys_freqs_p2t[bin, channel] = np.abs(peak2trough)
+                        heights[bin, channel] = np.max(peak_heights)
+                        dips[bin, channel] = np.abs(np.min(trough_dips))
+                        mid_peak[bin, channel] = middle_peak
+                        mid_trough[bin, channel] = middle_trough
+                        freqs[bin, channel] = freqs[bin, channel]
+
+
+                # Flatten the arrays and create a channel identifier array
+                channel_ids = np.tile(np.arange(nchannels), nbins)
+                bin_ids = np.repeat(np.arange(nbins), nchannels)
+
+
+                # Flatten all measurement arrays
+                ephys_freqs_p2p_flat = ephys_freqs_p2p.flatten()
+                ephys_freqs_p2t_flat = ephys_freqs_p2t.flatten()
+                heights_flat = heights.flatten()
+                dips_flat = dips.flatten()
+                freqs_flat = freqs.flatten()
+                mid_peak_flat = mid_peak.flatten()
+                mid_trough_flat = mid_trough.flatten()
+
+                # Create a dataframe to store the results
+                results = pd.DataFrame({
+                'channel': channel_ids,
+                'bin': bin_ids,
+                'ephys_freqs_p2p': ephys_freqs_p2p_flat,
+                'ephys_freqs_p2t': ephys_freqs_p2t_flat,
+                'heights': heights_flat,
+                'dips': dips_flat,
+                'freqs': freqs_flat,
+                'mid_peak': mid_peak_flat,
+                'mid_trough': mid_trough_flat})
+
+                # Add metadata to the dataframe
+                results['mouse'] = mouse
+                results['session'] = session
+                results['condition'] = condition
+
+                # saving intermediate results
+                save_path = os.path.join(save_dir, mouse, session, filter)
+                if not os.path.exists(save_path):
+                    os.makedirs(save_path)
+                
+                results.to_csv(os.path.join(save_path, f'{condition}_peak_trough_results.csv'), index = False)
+
+
+                # Append the results to the main dataframe
+                df = pd.concat([df, results], axis = 0)
+
+            # saving results after each session
+            df.to_csv(os.path.join(save_dir, f'peak_trough_results_{filter}.csv'), index = False)
+            print(f'Finished session {session} for mouse {mouse}!')
+
+
+
+
+def plot_raster_analysis(df_file, save_path, cutoff = 3, scatter = False, freqs = True):
+
+
+
+    # read in data
+    df = pd.read_csv(df_file)
+
+    # setting freqs to bin number if not specified
+    if not freqs:
+        df['freqs'] = (df['bin'] / 2) + 2.25
+        
+
+
+
+    # PREPROCESSING AND CLEANING DATA
+
+    # setting zero and inf values to NaN
+    columns_to_replace = ['ephys_freqs_p2t', 'ephys_freqs_p2p', 'dips', 'heights', 'mid_peak', 'mid_trough']
+    df[columns_to_replace] = df[columns_to_replace].replace({0: np.nan, np.inf: np.nan})
+
+    # Function to calculate z-scores
+    def calculate_zscores(x):
+        return stats.zscore(x, nan_policy='omit')
+
+    # creating z-scored columns
+    columns = ['ephys_freqs_p2t', 'ephys_freqs_p2p', 'heights', 'dips', 'mid_peak', 'mid_trough']
+    for col in columns:
+        df[f'zscore_{col}'] = df.groupby('bin')[col].transform(calculate_zscores)
+
+    # setting outliers to zero
+    for col in columns:
+        df.loc[np.abs(df[f'zscore_{col}']) > cutoff, col] = np.nan
+    
+    # setting NaN values to median along each frequency and mouse
+    clean_df = df.copy()
+
+    columns = ['ephys_freqs_p2t', 'ephys_freqs_p2p', 'heights', 'dips', 'mid_peak', 'mid_trough']
+    for col in columns:
+        clean_df[col] = df.groupby(['bin', 'mouse'])[col].transform(lambda x: x.fillna(x.median()))
+
+    # saving clean_df
+    clean_df.to_csv(os.path.join(save_path, 'clean_time_lags_results.csv'), index = False)
+
+
+
+    # PLOTTING
+
+    sns.set_style('white')
+    sns.set_context('poster')
+    
+    # plotting ephys peak to peak frequencies and peak to trough frequencies
+    fig, ax = plt.subplots(1, 2, figsize = (15, 10), sharex=True)
+
+
+    sns.despine()
+    # optionally plotting scatter points
+    if scatter:
+        sns.scatterplot(data = clean_df, x = 'freqs', y = 'ephys_freqs_p2p', hue = 'mouse', palette = 'viridis', s = 10, ax = ax[0])
+        sns.scatterplot(data = clean_df, x = 'freqs', y = 'heights', hue = 'mouse', palette = 'viridis', s = 10, ax = ax[1])
+
+
+    # PEAK TO PEAK TIMES (FREQUENCY)
+    for mouse in clean_df['mouse'].unique():
+        x, y = clean_df[clean_df['mouse'] == mouse]['freqs'], clean_df[clean_df['mouse'] == mouse]['ephys_freqs_p2p']
+        slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+        x = np.linspace(2, 12, 100)
+        y = slope * x + intercept
+        sns.lineplot(x = x, y = y, ax = ax[0], color = 'darkgrey')
+
+    x, y = clean_df['freqs'], clean_df['ephys_freqs_p2p']
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+    x = np.linspace(2, 12, 100)
+    y = slope * x + intercept
+    sns.lineplot(x = x, y = y, ax = ax[0], color = 'black')
+    legend_elements = [Line2D([0], [0], marker = None, color='w', lw=0, label=f'y = {slope:.2f}x + {intercept:.2f}'),
+                       Line2D([0], [0], marker=None, color='w', markersize=0, label=f' r = {r_value:.2f}, p  < {p_value:.2f}')]
+    ax[0].legend(handles=legend_elements, frameon = False)
+
+
+
+    
+
+    # PEAK HEIGHTS (ALIGNMENT)
+    for mouse in clean_df['mouse'].unique():
+        x, y = clean_df[clean_df['mouse'] == mouse]['freqs'], clean_df[clean_df['mouse'] == mouse]['heights']
+        slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+        x = np.linspace(2, 12, 100)
+        y = slope * x + intercept
+        sns.lineplot(x = x, y = y, ax = ax[1], color = 'darkgrey')
+
+    x, y = clean_df['freqs'], clean_df['heights']
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+    x = np.linspace(2, 12, 100)
+    y = slope * x + intercept
+    sns.lineplot(x = x, y = y, ax = ax[1], color = 'black')
+    legend_elements = [Line2D([0], [0], marker = None, color='w', lw=0, label=f'y = {slope:.2f}x + {intercept:.2f}'),
+                       Line2D([0], [0], marker=None, color='w', markersize=0, label=f' r = {r_value:.2f}, p < {p_value:.2f}')]
+    
+
+
+    ax[1].legend(handles=legend_elements, frameon = False)
+
+
+    # changing y tick label font size
+    ax[0].tick_params(axis = 'y')
+    ax[1].tick_params(axis = 'both')
+
+    ax[0].set_ylabel('Peak to Peak (Hz)')
+    ax[1].set_ylabel('Peak Amplitude (mV)')
+    ax[0].set_xlabel('Frequency (Hz)')
+    ax[1].set_xlabel('Frequency (Hz)')
+
+
+    plt.savefig(os.path.join(save_path, 'peak_trough_analysis.png'), dpi = 300)
+    
 
 
 
