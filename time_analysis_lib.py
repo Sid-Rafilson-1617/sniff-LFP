@@ -434,7 +434,7 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
     - LFP (numpy.ndarray): An array of shape (n_channels, n_samples) representing the LFP data.
     - sniff_times (numpy.ndarray): An array of timestamps indicating sniff times.
     - events (numpy.ndarray): An array containing event markers and conditions.
-    - filter (str, optional): Type of filter to apply to the LFP data. Supported values are 'lowpass', 'highpass', and 'bandpass'. Default is None.
+    - filter (str, optional): Type of filter to apply to the LFP data. Supported values are 'lowpass', 'highpass', 'bandpass'. Default is None.
     - cutoff (int or tuple, optional): Cutoff frequency/frequencies for the filter. If 'bandpass', a tuple of (low, high) is expected. Default is 24.
     - nbins (int, optional): Number of bins to divide the frequency range into. Default is 10.
     - freq_range (tuple, optional): Tuple indicating the frequency range to analyze, given as (low, high) in Hz. Default is (2, 12).
@@ -445,16 +445,20 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
 
     Returns:
     - numpy.ndarray: A 4D array of z-scores with dimensions corresponding to (condition, channels, window size, bins).
+    - numpy.ndarray: An array of average frequencies for each condition and bin.
 
     Raises:
     - ValueError: If an invalid filter type is provided.
 
     Examples:
     - To build a binned raster without filtering:
-    >>> z_scores = build_binned_raster(LFP_data, sniff_timestamps, event_markers)
+    >>> z_scores, avg_frequencies = build_binned_raster(LFP_data, sniff_timestamps, event_markers)
 
     - To apply a lowpass filter:
-    >>> z_scores = build_binned_raster(LFP_data, sniff_timestamps, event_markers, filter='lowpass', cutoff=24)
+    >>> z_scores, avg_frequencies = build_binned_raster(LFP_data, sniff_timestamps, event_markers, filter='lowpass', cutoff=24)
+
+    - To apply a bandpass filter:
+    >>> z_scores, avg_frequencies = build_binned_raster(LFP_data, sniff_timestamps, event_markers, filter='bandpass', cutoff=(2, 12))
     """
 
     # getting number of channels
@@ -463,14 +467,11 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
     # filtering signal
     order = 5
     if filter == 'lowpass':
-        sos = butter(order, cutoff, 'low', fs = f, output = 'sos')
-        signal = sosfiltfilt(sos, LFP, axis = 1)
+        signal = lowpass_ephys(LFP, cutoff, order)
     elif filter == 'highpass':
-        sos = butter(order, cutoff, 'high', fs = f, output = 'sos')
-        signal = sosfiltfilt(sos, LFP, axis = 1)
+        signal = highpass_ephys(LFP, cutoff, order)
     elif filter == 'bandpass':
-        sos = butter(order, cutoff, 'band', fs = f, output = 'sos')
-        signal = sosfiltfilt(sos, LFP, axis = 1)
+        signal = highpass_ephys(lowpass_ephys(LFP, cutoff[0], order), cutoff[1], order)
     else:
         signal = LFP
 
@@ -497,6 +498,7 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
 
     # preallocating arrays to hold zscores
     all_zscores = np.zeros((2, nchannels, window_size, nbins))
+    all_freqs = np.zeros((2, nbins))
 
 
 
@@ -523,6 +525,8 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
 
             # getting sniff times for current frequency range
             current_infreq_sniff_times = current_sniff_times[np.logical_and(current_freqs >= current_range[0], current_freqs < current_range[1])]
+            all_freqs[col, bin] = np.mean(current_freqs[np.logical_and(current_freqs >= current_range[0], current_freqs < current_range[1])])
+
 
             num_sniffs = len(current_infreq_sniff_times)
             print(f'Number of sniffs in current frequency range: {num_sniffs}\n')
@@ -532,7 +536,7 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
                 continue
 
 
-
+            
             # building null distribution for current frequency range
             avg_activity_distributions = np.zeros((nchannels, window_size, nshifts))
             for shift in range(nshifts):
@@ -568,7 +572,8 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
 
 
 
-    return all_zscores
+    return all_zscores, all_freqs
+
 
 
 
@@ -584,31 +589,8 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
 
 
 
-def build_all_rasters(data_dir: str, save_dir: str, window_size = 1_000, nshifts = 100, mice = ['1410', '1412', '4122', '4127', '4131', '4138']):
 
-    """
-    Main function for processing and analyzing LFP and sniff data across multiple mice and sessions.
-
-    This function orchestrates the workflow for analyzing olfactory bulb local field potentials (LFPs) and sniff data.
-    It reads data from the specified directory, performs specified analyses, and saves the results. The function handles
-    multiple mice and sessions, applies various filters, calculates z-scores, and organizes the output data into a structured format.
-
-    Parameters:
-    - data_dir (str): Path to the directory containing the data files.
-    - save_dir (str): Path to the directory where the results will be saved.
-    - window_size (int, optional): Size of the window for analysis in milliseconds. Defaults to 1000.
-    - nshifts (int, optional): Number of circular shifts used for generating null distributions in z-score calculations. Defaults to 100.
-    - mice (list of str, optional): List of mouse IDs to include in the analysis. If None, all mice in the directory will be processed.
-
-    Examples:
-    - To run analysis for specific mice with custom settings:
-        >>> LFP_sniff_analysis('path/to/data', 'path/to/save', window_size=500, nshifts=50, mice=['1410', '1412'])
-
-    Notes:
-    - The function expects each mouse's data to be in a separate subdirectory named after the mouse ID within `data_dir`.
-    - Each session within a mouse's directory should contain 'LFP.npy', 'sniff_params.mat', and 'events.mat' files.
-    - The results are saved in a structured directory format, preserving the organization of mice and sessions.
-    """
+def build_all_rasters(data_dir: str, save_dir: str, window_size = 1_000, nshifts = 100, nbins = 20, mice = ['1410', '1412', '4122', '4127', '4131', '4138']):
 
     files = os.listdir(data_dir)
     for file in files:
@@ -637,11 +619,12 @@ def build_all_rasters(data_dir: str, save_dir: str, window_size = 1_000, nshifts
                 # building binned LFP raster for each filter type
                 filters_cutoffs = {'lowpass': 24, 'highpass': 24, 'bandpass': (0.1, 24)}
                 for filter in filters_cutoffs:
-                    zscores = build_binned_raster(LFP, inh, events, filter = filter, cutoff = filters_cutoffs[filter], normalize = 'affine', window_size = window_size, nshifts = nshifts)
+                    zscores, freqs = build_binned_raster(LFP, inh, events, filter = filter, cutoff = filters_cutoffs[filter], normalize = 'affine', window_size = window_size, nshifts = nshifts, nbins = nbins)
                     
                     # saving zscores
                     np.save(os.path.join(save_path, f'{filter}_z_scores.npy'), zscores)
-      
+                    np.save(os.path.join(save_path, f'{filter}_freqs.npy'), freqs)
+        
 
 
 def plot_and_save_rasters(data_dir: str, save_dir: str, filters = ['lowpass', 'highpass', 'bandpass'], mice = ['1410', '1412', '4122', '4127', '4131', '4138']):
