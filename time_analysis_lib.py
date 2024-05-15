@@ -13,7 +13,7 @@ from matplotlib.lines import Line2D
 import seaborn as sns
 import scipy.io
 from scipy import stats
-import scipy.signal as signal
+from scipy.signal import butter, sosfiltfilt, savgol_filter, find_peaks
 
 
 #______________________________________________________________________________CORE FUNCTIONS______________________________________________________________________________#
@@ -465,14 +465,14 @@ def build_binned_raster(LFP: np.array, sniff_times: np.array, events: np.array, 
     # filtering signal
     order = 5
     if filter == 'lowpass':
-        sos = signal.butter(order, cutoff, 'low', fs = f, output = 'sos')
-        signal = signal.sosfiltfilt(sos, LFP, axis = 1)
+        sos = butter(order, cutoff, 'low', fs = f, output = 'sos')
+        signal = sosfiltfilt(sos, LFP, axis = 1)
     elif filter == 'highpass':
-        sos = signal.butter(order, cutoff, 'high', fs = f, output = 'sos')
-        signal = signal.sosfiltfilt(sos, LFP, axis = 1)
+        sos = butter(order, cutoff, 'high', fs = f, output = 'sos')
+        signal = sosfiltfilt(sos, LFP, axis = 1)
     elif filter == 'bandpass':
-        sos = signal.butter(order, cutoff, 'band', fs = f, output = 'sos')
-        signal = signal.sosfiltfilt(sos, LFP, axis = 1)
+        sos = butter(order, cutoff, 'band', fs = f, output = 'sos')
+        signal = sosfiltfilt(sos, LFP, axis = 1)
     else:
         signal = LFP
 
@@ -804,11 +804,11 @@ def analyze_rasters(data_dir: str, save_dir: str, filter: str = 'lowpass', mice:
                         window_size = data.shape[0]
 
                         # smoothing data
-                        smoothed_data = signal.savgol_filter(data, wl, polyorder)
+                        smoothed_data = savgol_filter(data, wl, polyorder)
 
                         # finding peaks and troughs
-                        peaks, _ = signal.find_peaks(smoothed_data, prominence = min_peak_prominance)
-                        troughs, _ = signal.find_peaks(-smoothed_data, prominence = min_peak_prominance)
+                        peaks, _ = find_peaks(smoothed_data, prominence = min_peak_prominance)
+                        troughs, _ = find_peaks(-smoothed_data, prominence = min_peak_prominance)
 
                         # preallocating arrays to hold peak and trough heights
                         peak_heights = []
@@ -1061,6 +1061,5 @@ def plot_raster_analysis(df_file, save_path, cutoff = 3, scatter = False, freqs 
 
     plt.savefig(os.path.join(save_path, 'peak_trough_analysis.png'), dpi = 300)
     
-
 
 
